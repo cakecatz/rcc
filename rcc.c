@@ -6,7 +6,8 @@
 
 // token values
 enum {
-  TK_NUM = 256,
+  ND_NUM = 256, // integer
+  TK_NUM = 256, // integer
   TK_EOF, // end of input
 };
 
@@ -17,10 +18,99 @@ typedef struct {
   char *input; // token string for error message
 } Token;
 
-// program
-char *user_input;
+typedef struct Node {
+  int ty;
+  struct Node *lhs;
+  struct Node *rhs;
+  int val;
+} Node;
+
+Node *expr();
+Node *mul();
+Node *term();
+
 
 Token tokens[100];
+int pos = 0;
+char* user_input;
+
+void error_at(char *loc, char *msg) {
+  int input_pos = loc - user_input;
+  fprintf(stderr, "%s\n", user_input);
+  fprintf(stderr, "%*s", input_pos, ""); // pos個の空白を出力
+  fprintf(stderr, "^ %s\n", msg);
+  exit(1);
+}
+
+int consume(int ty) {
+  if (tokens[pos].ty != ty) {
+    return 0;
+  }
+
+  pos++;
+  return 1;
+}
+
+Node *new_node(int ty, Node *lhs, Node *rhs) {
+  Node *node = malloc(sizeof(Node));
+  node->ty = ty;
+  node->lhs = lhs;
+  node->rhs = rhs;
+  return node;
+}
+
+Node *new_node_num(int val) {
+  Node *node = malloc(sizeof(Node));
+  node->ty = ND_NUM;
+  node->val = val;
+  return node;
+}
+
+
+Node *term() {
+  if (consume('(')) {
+    Node *node = expr();
+    if (!consume(')')) {
+      error_at(tokens[pos].input, "開きカッコに対応する閉じカッコがありません");
+    }
+    return node;
+  }
+
+  if (tokens[pos].ty == TK_NUM) {
+    return new_node_num(tokens[pos++].val);
+  }
+
+  error_at(tokens[pos].input, "数値でも開きカッコでもないトークンです");
+}
+
+
+Node *mul() {
+  Node *node = term();
+
+  for (;;) {
+    if (consume('*')) {
+      node = new_node('*', node, term());
+    } else if(consume('/')) {
+      node = new_node('/', node, term());
+    } else {
+      return node;
+    }
+  }
+}
+
+Node *expr() {
+  Node *node = mul();
+
+  for (;;) {
+    if (consume('+')) {
+      node = new_node('+', node, mul());
+    } else if (consume('-')) {
+      node = new_node('-', node, mul());
+    }  else {
+      return node;
+    }
+  }
+}
 
 void error(char *fmt, ...) {
   va_list ap;
@@ -31,17 +121,38 @@ void error(char *fmt, ...) {
   exit(1);
 }
 
-void error_at(char *loc, char *msg) {
-  int pos = loc - user_input;
-  fprintf(stderr, "%s\n", user_input);
-  fprintf(stderr, "%*s", pos, ""); // pos個の空白を出力
-  fprintf(stderr, "^ %s\n", msg);
-  exit(1);
+void gen(Node *node) {
+  if (node->ty == ND_NUM) {
+    printf("  push %d\n", node->val);
+    return;
+  }
+
+  gen(node->lhs);
+  gen(node->rhs);
+
+  printf("  pop rdi\n");
+  printf("  pop rax\n");
+
+  switch(node->ty) {
+    case '+':
+      printf("  add rax, rdi\n");
+      break;
+    case '-':
+      printf("  sub rax, rdi\n");
+      break;
+    case '*':
+      printf("  imul rdi\n");
+      break;
+    case '/':
+      printf("  cqo\n");
+      printf("  idiv rdi\n");
+      break;
+  }
+
+  printf("  push rax\n");
 }
 
-void tokenize() {
-  char *p = user_input;
-
+void tokenize(char *p) {
   int i = 0;
 
   while(*p) {
@@ -50,7 +161,7 @@ void tokenize() {
       continue;
     }
 
-    if (*p == '+' || *p == '-') {
+    if (*p == '+' || *p == '-' || *p == '*' || *p == '/' || *p == '(' || *p == ')') {
       tokens[i].ty = *p;
       tokens[i].input = p;
       i++;
@@ -73,53 +184,24 @@ void tokenize() {
   tokens[i].input = p;
 }
 
-
-
 int main(int argc, char **argv) {
-
   if (argc != 2) {
     fprintf(stderr, "引数の個数が正しくありません\n");
     return 1;
   }
 
-  // tokenize
   user_input = argv[1];
-  tokenize();
+  tokenize(user_input);
+  Node *node = expr();
 
   printf(".intel_syntax noprefix\n");
   printf(".global main\n");
   printf("main:\n");
 
-  if (tokens[0].ty != TK_NUM)
-    error_at(tokens[0].input, "Should be number");
-  
-  printf("  mov rax, %d\n", tokens[0].val);
+  gen(node);
 
-  int i = 1;
-  while(tokens[i].ty != TK_EOF) {
-    if (tokens[i].ty == '+') {
-      i++;
-      if (tokens[i].ty != TK_NUM) {
-        error_at(tokens[i].input, "Should be number");
-      }
-      printf("  add rax, %d\n", tokens[i].val);
-      i++;
-      continue;
-    }
-
-    if (tokens[i].ty == '-') {
-      i++;
-      if (tokens[i].ty != TK_NUM) {
-        error_at(tokens[i].input, "Should be number");
-      }
-      printf("  sub rax, %d\n", tokens[i].val);
-      i++;
-      continue;
-    }
-
-    error_at(tokens[i].input, "予期しないトークンです");
-  }
-
+  printf("  pop rax\n");
   printf("  ret\n");
+
   return 0;
 }
