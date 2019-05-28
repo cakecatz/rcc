@@ -6,9 +6,23 @@
 
 // token values
 enum {
-  ND_NUM = 256, // integer
   TK_NUM = 256, // integer
   TK_EOF, // end of input
+  TK_EQ,
+  TK_NE,
+  TK_LTE,
+  TK_GTE
+};
+
+// node values
+enum {
+  ND_NUM = 256,
+  ND_LT,    // <
+  ND_LTE,   // <=
+  ND_GT,    // >
+  ND_GTE,   // >=
+  ND_EQ,    // ==
+  ND_NE,    // !=
 };
 
 // token type
@@ -29,6 +43,9 @@ Node *expr();
 Node *mul();
 Node *term();
 Node *unary();
+Node *equality();
+Node *relational();
+Node *add();
 
 Token tokens[100];
 int pos = 0;
@@ -64,6 +81,52 @@ Node *new_node_num(int val) {
   node->ty = ND_NUM;
   node->val = val;
   return node;
+}
+
+Node *equality() {
+  Node *node = relational();
+
+  for (;;) {
+    if (consume(TK_EQ)) {
+      node = new_node(ND_EQ, node, relational());
+    } else if (consume(TK_NE)) {
+      node = new_node(ND_NE, node, relational());
+    } else {
+      return node;
+    }
+  }
+}
+
+Node *relational() {
+  Node *node = add();
+
+  for (;;) {
+    if (consume(TK_LTE)) {
+      node = new_node(ND_LTE, node, add());
+    } else if (consume(TK_GTE)) {
+      node = new_node(ND_GTE, node, add());
+    } else if (consume('<')) {
+      node = new_node(ND_LT, node, add());
+    } else if (consume('>')) {
+      node = new_node(ND_GT, node, add());
+    } else {
+      return node;
+    }
+  }
+}
+
+Node *add() {
+  Node *node = mul();
+
+  for (;;) {
+    if (consume('+')) {
+      node = new_node('+', node, mul());
+    } else if (consume('-')) {
+      node = new_node('-', node, mul());
+    }  else {
+      return node;
+    }
+  }
 }
 
 Node *unary() {
@@ -110,17 +173,7 @@ Node *mul() {
 }
 
 Node *expr() {
-  Node *node = mul();
-
-  for (;;) {
-    if (consume('+')) {
-      node = new_node('+', node, mul());
-    } else if (consume('-')) {
-      node = new_node('-', node, mul());
-    }  else {
-      return node;
-    }
-  }
+  return equality();
 }
 
 void error(char *fmt, ...) {
@@ -158,6 +211,36 @@ void gen(Node *node) {
       printf("  cqo\n");
       printf("  idiv rdi\n");
       break;
+    case ND_EQ:
+      printf("  cmp rax, rdi\n");
+      printf("  sete al\n");
+      printf("  movzb rax, al\n");
+      break;
+    case ND_NE:
+      printf("  cmp rax, rdi\n");
+      printf("  setne al\n");
+      printf("  movzb rax, al\n");
+      break;
+    case ND_LT:
+      printf("  cmp rax, rdi\n");
+      printf("  setl al\n");
+      printf("  movzb rax, al\n");
+      break;
+    case ND_LTE:
+      printf("  cmp rax, rdi\n");
+      printf("  setle al\n");
+      printf("  movzb rax, al\n");
+      break;
+    case ND_GT:
+      printf("  cmp rdi, rax\n");
+      printf("  setl al\n");
+      printf("  movzb rax, al\n");
+      break;
+    case ND_GTE:
+      printf("  cmp rdi, rax\n");
+      printf("  setle al\n");
+      printf("  movzb rax, al\n");
+      break;
   }
 
   printf("  push rax\n");
@@ -168,6 +251,54 @@ void tokenize(char *p) {
 
   while(*p) {
     if (isspace(*p)) {
+      p++;
+      continue;
+    }
+
+    if (strncmp(p, "==", 2) == 0) {
+      tokens[i].ty = TK_EQ;
+      tokens[i].input = p;
+      i++;
+      p += 2;
+      continue;
+    }
+
+    if (strncmp(p, "!=", 2) == 0) {
+      tokens[i].ty = TK_NE;
+      tokens[i].input = p;
+      i++;
+      p += 2;
+      continue;
+    }
+
+    if (strncmp(p, "<=", 2) == 0) {
+      tokens[i].ty = TK_LTE;
+      tokens[i].input = p;
+      i++;
+      p += 2;
+      continue;
+    }
+
+    if (strncmp(p, ">=", 2) == 0) {
+      tokens[i].ty = TK_GTE;
+      tokens[i].input = p;
+      i++;
+      p += 2;
+      continue;
+    }
+
+    if (*p == '<') {
+      tokens[i].ty = '<';
+      tokens[i].input = p;
+      i++;
+      p++;
+      continue;
+    }
+
+    if (*p == '>') {
+      tokens[i].ty = '>';
+      tokens[i].input = p;
+      i++;
       p++;
       continue;
     }
