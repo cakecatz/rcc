@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 // token values
 enum {
@@ -26,7 +27,7 @@ enum {
 };
 
 // token type
-typedef struct {
+typedef struct Token {
   int ty; // type
   int val; // value
   char *input; // token string for error message
@@ -39,6 +40,12 @@ typedef struct Node {
   int val;
 } Node;
 
+typedef struct {
+  void **data;
+  int capacity;
+  int len;
+} Vector;
+
 Node *expr();
 Node *mul();
 Node *term();
@@ -46,6 +53,24 @@ Node *unary();
 Node *equality();
 Node *relational();
 Node *add();
+Vector *new_vector();
+
+Vector *new_vector() {
+  Vector *vec = malloc(sizeof(Vector));
+  vec->data = malloc(sizeof(void *) * 16);
+  vec->capacity = 16;
+  vec->len = 0;
+  return vec;
+}
+
+void vec_push(Vector *vec, void *elem) {
+  if (vec->capacity == vec->len) {
+    vec->capacity *= 2;
+    vec->data = realloc(vec->data, sizeof(void *) * vec->capacity);
+  }
+
+  vec->data[vec->len++] = elem;
+}
 
 Token tokens[100];
 int pos = 0;
@@ -332,6 +357,11 @@ int main(int argc, char **argv) {
     return 1;
   }
 
+  if (strcmp(argv[1], "-test") == 0) {
+    runtest();
+    return 0;
+  }
+
   user_input = argv[1];
   tokenize(user_input);
   Node *node = expr();
@@ -346,4 +376,32 @@ int main(int argc, char **argv) {
   printf("  ret\n");
 
   return 0;
+}
+
+
+// testing
+
+void expect(int line, int expected, int actual) {
+  if (expected == actual) {
+    return;
+  }
+
+  fprintf(stderr, "Line %d: \e[92m%d\e[0m expected, but got \e[91m%d\e[0m\n", line, expected, actual);
+  exit(1);
+}
+
+void runtest() {
+  Vector *vec = new_vector();
+  expect(__LINE__, 0, vec->len);
+
+  for (int i = 0; i< 100; i++) {
+    vec_push(vec, (void *)i);
+  }
+
+  expect(__LINE__, 100, vec->len);
+  expect(__LINE__, 0, (long)vec->data[0]);
+  expect(__LINE__, 50, (long)vec->data[50]);
+  expect(__LINE__, 99, (long)vec->data[99]);
+
+  printf("OK\n");
 }

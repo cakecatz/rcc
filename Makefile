@@ -1,6 +1,7 @@
 rcc: rcc.c
 
 test: rcc
+	./rcc -test
 	./test.sh
 
 clean:
