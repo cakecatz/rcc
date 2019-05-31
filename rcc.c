@@ -54,6 +54,7 @@ Node *equality();
 Node *relational();
 Node *add();
 Vector *new_vector();
+void runtest();
 
 Vector *new_vector() {
   Vector *vec = malloc(sizeof(Vector));
