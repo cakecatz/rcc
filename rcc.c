@@ -3,33 +3,40 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+
+#define tokenValue(p, key) (*(Token *)tokens->data[p]).key
 
 // token values
-enum {
+enum TK {
   TK_NUM = 256, // integer
-  TK_EOF, // end of input
+  TK_EOF,
   TK_EQ,
   TK_NE,
   TK_LTE,
-  TK_GTE
+  TK_GTE,
+  TK_INC,
+  TK_MUL,
+  TK_DIV,
+  TK_RBR,
+  TK_LBR,
+  TK_DEC
 };
 
 // node values
-enum {
+enum ND {
   ND_NUM = 256,
-  ND_LT,    // <
-  ND_LTE,   // <=
-  ND_GT,    // >
-  ND_GTE,   // >=
-  ND_EQ,    // ==
-  ND_NE,    // !=
+  ND_LT,  // <
+  ND_LTE, // <=
+  ND_GT,  // >
+  ND_GTE, // >=
+  ND_EQ,  // ==
+  ND_NE,  // !=
 };
 
 // token type
 typedef struct Token {
-  int ty; // type
-  int val; // value
+  int ty;      // type
+  int val;     // value
   char *input; // token string for error message
 } Token;
 
@@ -73,20 +80,29 @@ void vec_push(Vector *vec, void *elem) {
   vec->data[vec->len++] = elem;
 }
 
-Token tokens[100];
+Vector *tokens;
 int pos = 0;
-char* user_input;
+char *user_input;
+
+void t(int i) { printf("{ty: %d},", (*(Token *)tokens->data[i]).ty); }
+
+void debug_tokens() {
+  printf("\n[");
+  for (int i = 0; i < tokens->len; i++) {
+    t(i);
+  }
+  printf("]\n");
+}
 
 void error_at(char *loc, char *msg) {
-  int input_pos = loc - user_input;
   fprintf(stderr, "%s\n", user_input);
-  fprintf(stderr, "%*s", input_pos, ""); // pos個の空白を出力
+  // fprintf(stderr, "%*s", input_pos, ""); // pos個の空白を出力
   fprintf(stderr, "^ %s\n", msg);
   exit(1);
 }
 
 int consume(int ty) {
-  if (tokens[pos].ty != ty) {
+  if (((Token *)tokens->data[pos])->ty != ty) {
     return 0;
   }
 
@@ -145,22 +161,22 @@ Node *add() {
   Node *node = mul();
 
   for (;;) {
-    if (consume('+')) {
+    if (consume(TK_INC)) {
       node = new_node('+', node, mul());
-    } else if (consume('-')) {
+    } else if (consume(TK_DEC)) {
       node = new_node('-', node, mul());
-    }  else {
+    } else {
       return node;
     }
   }
 }
 
 Node *unary() {
-  if (consume('+')) {
+  if (consume(TK_INC)) {
     return term();
   }
 
-  if (consume('-')) {
+  if (consume(TK_DEC)) {
     return new_node('-', new_node_num(0), term());
   }
 
@@ -168,29 +184,30 @@ Node *unary() {
 }
 
 Node *term() {
-  if (consume('(')) {
+  if (consume(TK_RBR)) {
     Node *node = expr();
-    if (!consume(')')) {
-      error_at(tokens[pos].input, "開きカッコに対応する閉じカッコがありません");
+    if (!consume(TK_LBR)) {
+      error_at(((Token *)tokens->data[pos])->input,
+               "開きカッコに対応する閉じカッコがありません");
     }
     return node;
   }
 
-  if (tokens[pos].ty == TK_NUM) {
-    return new_node_num(tokens[pos++].val);
+  if ((*(Token *)tokens->data[pos]).ty == TK_NUM) {
+    return new_node_num(((Token *)tokens->data[pos++])->val);
   }
 
-  error_at(tokens[pos].input, "数値でも開きカッコでもないトークンです");
+  error_at(((Token *)tokens->data[pos])->input,
+           "数値でも開きカッコでもないトークンです");
 }
-
 
 Node *mul() {
   Node *node = unary();
 
   for (;;) {
-    if (consume('*')) {
+    if (consume(TK_MUL)) {
       node = new_node('*', node, unary());
-    } else if(consume('/')) {
+    } else if (consume(TK_DIV)) {
       node = new_node('/', node, unary());
     } else {
       return node;
@@ -198,9 +215,7 @@ Node *mul() {
   }
 }
 
-Node *expr() {
-  return equality();
-}
+Node *expr() { return equality(); }
 
 void error(char *fmt, ...) {
   va_list ap;
@@ -223,124 +238,163 @@ void gen(Node *node) {
   printf("  pop rdi\n");
   printf("  pop rax\n");
 
-  switch(node->ty) {
-    case '+':
-      printf("  add rax, rdi\n");
-      break;
-    case '-':
-      printf("  sub rax, rdi\n");
-      break;
-    case '*':
-      printf("  imul rdi\n");
-      break;
-    case '/':
-      printf("  cqo\n");
-      printf("  idiv rdi\n");
-      break;
-    case ND_EQ:
-      printf("  cmp rax, rdi\n");
-      printf("  sete al\n");
-      printf("  movzb rax, al\n");
-      break;
-    case ND_NE:
-      printf("  cmp rax, rdi\n");
-      printf("  setne al\n");
-      printf("  movzb rax, al\n");
-      break;
-    case ND_LT:
-      printf("  cmp rax, rdi\n");
-      printf("  setl al\n");
-      printf("  movzb rax, al\n");
-      break;
-    case ND_LTE:
-      printf("  cmp rax, rdi\n");
-      printf("  setle al\n");
-      printf("  movzb rax, al\n");
-      break;
-    case ND_GT:
-      printf("  cmp rdi, rax\n");
-      printf("  setl al\n");
-      printf("  movzb rax, al\n");
-      break;
-    case ND_GTE:
-      printf("  cmp rdi, rax\n");
-      printf("  setle al\n");
-      printf("  movzb rax, al\n");
-      break;
+  switch (node->ty) {
+  case '+':
+    printf("  add rax, rdi\n");
+    break;
+  case '-':
+    printf("  sub rax, rdi\n");
+    break;
+  case '*':
+    printf("  imul rdi\n");
+    break;
+  case '/':
+    printf("  cqo\n");
+    printf("  idiv rdi\n");
+    break;
+  case ND_EQ:
+    printf("  cmp rax, rdi\n");
+    printf("  sete al\n");
+    printf("  movzb rax, al\n");
+    break;
+  case ND_NE:
+    printf("  cmp rax, rdi\n");
+    printf("  setne al\n");
+    printf("  movzb rax, al\n");
+    break;
+  case ND_LT:
+    printf("  cmp rax, rdi\n");
+    printf("  setl al\n");
+    printf("  movzb rax, al\n");
+    break;
+  case ND_LTE:
+    printf("  cmp rax, rdi\n");
+    printf("  setle al\n");
+    printf("  movzb rax, al\n");
+    break;
+  case ND_GT:
+    printf("  cmp rdi, rax\n");
+    printf("  setl al\n");
+    printf("  movzb rax, al\n");
+    break;
+  case ND_GTE:
+    printf("  cmp rdi, rax\n");
+    printf("  setle al\n");
+    printf("  movzb rax, al\n");
+    break;
   }
 
   printf("  push rax\n");
 }
 
+void add_token(int ty, char *p) {
+  Token *t = malloc(sizeof(Token));
+  t->ty = ty;
+  t->input = p;
+  vec_push(tokens, t);
+}
+
 void tokenize(char *p) {
   int i = 0;
+  int tk = -1;
+  int len = 0;
 
-  while(*p) {
+  while (*p) {
     if (isspace(*p)) {
       p++;
       continue;
     }
 
     if (strncmp(p, "==", 2) == 0) {
-      tokens[i].ty = TK_EQ;
-      tokens[i].input = p;
+      add_token(TK_EQ, p);
       i++;
       p += 2;
       continue;
     }
 
     if (strncmp(p, "!=", 2) == 0) {
-      tokens[i].ty = TK_NE;
-      tokens[i].input = p;
+      add_token(TK_NE, p);
       i++;
       p += 2;
       continue;
     }
 
     if (strncmp(p, "<=", 2) == 0) {
-      tokens[i].ty = TK_LTE;
-      tokens[i].input = p;
+      add_token(TK_LTE, p);
       i++;
       p += 2;
       continue;
     }
 
     if (strncmp(p, ">=", 2) == 0) {
-      tokens[i].ty = TK_GTE;
-      tokens[i].input = p;
+      add_token(TK_GTE, p);
       i++;
       p += 2;
       continue;
     }
 
     if (*p == '<') {
-      tokens[i].ty = '<';
-      tokens[i].input = p;
+      add_token('<', p);
       i++;
       p++;
       continue;
     }
 
     if (*p == '>') {
-      tokens[i].ty = '>';
-      tokens[i].input = p;
+      add_token('>', p);
       i++;
       p++;
       continue;
     }
 
-    if (*p == '+' || *p == '-' || *p == '*' || *p == '/' || *p == '(' || *p == ')') {
-      tokens[i].ty = *p;
-      tokens[i].input = p;
+    if (*p == '+') {
+      add_token(TK_INC, p);
+      i++;
+      p++;
+      continue;
+    }
+
+    if (*p == '-') {
+      add_token(TK_DEC, p);
+      i++;
+      p++;
+      continue;
+    }
+
+    if (*p == '*') {
+      add_token(TK_MUL, p);
+      i++;
+      p++;
+      continue;
+    }
+
+    if (*p == '/') {
+      add_token(TK_DIV, p);
+      i++;
+      p++;
+      continue;
+    }
+
+    if (*p == '(') {
+      add_token(TK_RBR, p);
+      i++;
+      p++;
+      continue;
+    }
+
+    if (*p == ')') {
+      add_token(TK_LBR, p);
       i++;
       p++;
       continue;
     }
 
     if (isdigit(*p)) {
-      tokens[i].ty = TK_NUM;
-      tokens[i].input = p;
-      tokens[i].val = strtol(p, &p, 10);
+      Token *t = malloc(sizeof(Token));
+      t->ty = TK_NUM;
+      t->input = p;
+      t->val = strtol(p, &p, 10);
+      vec_push(tokens, t);
       i++;
       continue;
     }
@@ -348,8 +402,7 @@ void tokenize(char *p) {
     error_at(p, "cannot tokenize");
   }
 
-  tokens[i].ty = TK_EOF;
-  tokens[i].input = p;
+  add_token(TK_EOF, p);
 }
 
 int main(int argc, char **argv) {
@@ -364,7 +417,9 @@ int main(int argc, char **argv) {
   }
 
   user_input = argv[1];
+  tokens = new_vector();
   tokenize(user_input);
+
   Node *node = expr();
 
   printf(".intel_syntax noprefix\n");
@@ -379,7 +434,6 @@ int main(int argc, char **argv) {
   return 0;
 }
 
-
 // testing
 
 void expect(int line, int expected, int actual) {
@@ -387,7 +441,8 @@ void expect(int line, int expected, int actual) {
     return;
   }
 
-  fprintf(stderr, "Line %d: \e[92m%d\e[0m expected, but got \e[91m%d\e[0m\n", line, expected, actual);
+  fprintf(stderr, "Line %d: \e[92m%d\e[0m expected, but got \e[91m%d\e[0m\n",
+          line, expected, actual);
   exit(1);
 }
 
@@ -395,7 +450,7 @@ void runtest() {
   Vector *vec = new_vector();
   expect(__LINE__, 0, vec->len);
 
-  for (int i = 0; i< 100; i++) {
+  for (int i = 0; i < 100; i++) {
     vec_push(vec, (void *)i);
   }
 
@@ -403,6 +458,10 @@ void runtest() {
   expect(__LINE__, 0, (long)vec->data[0]);
   expect(__LINE__, 50, (long)vec->data[50]);
   expect(__LINE__, 99, (long)vec->data[99]);
+
+  Token t = {.ty = '>'};
+  vec_push(vec, &t);
+  expect(__LINE__, '>', ((Token *)vec->data[100])->ty);
 
   printf("OK\n");
 }
